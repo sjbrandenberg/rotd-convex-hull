@@ -1,0 +1,13 @@
+__pycache__/
+*.aux
+*.log
+*.out
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.synctex.gz
+data/*.npz
+results/
+paper/
+figures/
