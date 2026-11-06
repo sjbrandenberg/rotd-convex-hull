@@ -25,6 +25,7 @@ and of **band-limited cumulative absolute velocity** (the support function of a 
 | `code/fetch_records.py` | Downloads records from the NGA-gm database API (https://nga-gm.org; Buckreis et al., 2025) into `data/`. Needs an API token from a nga-gm.org account. |
 | `code/tabas.py` | The Tabas record (1978 Tabas, Iran; time_series_metadata_id 57394): exact, one-degree, and RCTC-subset RotD of PGA, PGV, and PSA. |
 | `code/sample.py` | The same, with Arias intensity and CAV, for the records in `data/sample_ids.txt`. |
+| `code/timing.py` | Times the rotation step of the exact method against rotating every time step at 1-degree and 0.1-degree increments (single thread). |
 | `code/fig_*.py` | The paper's figures, written to `figures/`. |
 
 ## Reproducing the results
@@ -38,6 +39,8 @@ python code/fetch_records.py --token-file ~/token.txt --ids-file data/sample_ids
 cd code
 python tabas.py
 python sample.py --workers 8
+python timing.py --records 50 --seed 2 --no-tenth   # exact vs 1 degree
+python timing.py --records 10                       # also 0.1 degree (slow)
 python fig_hull.py && python fig_spectra.py && python fig_pacoima.py && python fig_sample.py
 ```
 
