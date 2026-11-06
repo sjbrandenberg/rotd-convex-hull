@@ -11,3 +11,5 @@ data/*.npz
 results/
 paper/
 figures/
+overleaf/
+overleaf_upload.zip
