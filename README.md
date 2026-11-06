@@ -30,13 +30,15 @@ and of **band-limited cumulative absolute velocity** (the support function of a 
 ## Reproducing the results
 
 ```bash
+git clone https://github.com/sjbrandenberg/rotd-convex-hull.git
+cd rotd-convex-hull
 pip install numpy scipy matplotlib
 python code/fetch_records.py --token-file ~/token.txt 57394 74
 python code/fetch_records.py --token-file ~/token.txt --ids-file data/sample_ids.txt
 cd code
 python tabas.py
 python sample.py --workers 8
-python fig_hull.py && python fig_spectra.py && python fig_pacoima.py
+python fig_hull.py && python fig_spectra.py && python fig_pacoima.py && python fig_sample.py
 ```
 
 ## Using the exact method
