@@ -18,10 +18,11 @@ import time  # noqa: E402
 
 import numpy as np  # noqa: E402
 
-import rctc  # noqa: E402
+import convex_hull  # noqa: E402
+import spectra  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PERIODS = np.array(rctc.DEFAULT_PERIODS)
+PERIODS = np.array(spectra.DEFAULT_PERIODS)
 PCT = np.array([0, 50, 100])
 
 
@@ -39,17 +40,17 @@ def brute(x, y, step_deg, chunk=4_000_000):
 
 def responses(h1, h2, dt):
     """The two components' series for PGV, PGA, and each period's relative displacement."""
-    f = rctc.interpolation_factor(dt)
-    fine1, fine2 = rctc.Interpft(h1, f), rctc.Interpft(h2, f)
+    f = spectra.interpolation_factor(dt)
+    fine1, fine2 = spectra.Interpft(h1, f), spectra.Interpft(h2, f)
     out = []
     for p in PERIODS:
         if p == -1:
-            out.append((rctc._cumtrapz(h1, dt), rctc._cumtrapz(h2, dt)))
+            out.append((spectra._cumtrapz(h1, dt), spectra._cumtrapz(h2, dt)))
         elif p == 0:
             out.append((h1, h2))
         else:
-            out.append((rctc.relative_displacement(fine1, p, 0.05, dt / f),
-                        rctc.relative_displacement(fine2, p, 0.05, dt / f)))
+            out.append((spectra.relative_displacement(fine1, p, 0.05, dt / f),
+                        spectra.relative_displacement(fine2, p, 0.05, dt / f)))
     return out
 
 
@@ -82,7 +83,7 @@ def main():
         t_resp = time.perf_counter() - t0
         times = {}
         results = {}
-        methods = [('exact', lambda x, y: rctc.rotd_percentiles(x, y, PCT)), ('deg1', lambda x, y: brute(x, y, 1.0))]
+        methods = [('exact', lambda x, y: convex_hull.rotd_percentiles(x, y, PCT)), ('deg1', lambda x, y: brute(x, y, 1.0))]
         if not args.no_tenth:
             methods.append(('deg01', lambda x, y: brute(x, y, 0.1)))
         for name, fn in methods:

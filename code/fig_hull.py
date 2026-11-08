@@ -7,7 +7,8 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-import rctc
+import convex_hull
+import spectra
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 plt.rcParams.update({'font.family': 'Arial', 'font.size': 9, 'axes.linewidth': 0.8})
@@ -15,13 +16,13 @@ plt.rcParams.update({'font.family': 'Arial', 'font.size': 9, 'axes.linewidth': 0
 d = np.load(os.path.join(ROOT, 'data', '57394.npz'))
 h1, h2, dt = d['h1'], d['h2'], float(d['dt'])
 T = 1.71
-f = rctc.interpolation_factor(dt)
-x = rctc.relative_displacement(rctc.Interpft(h1, f), T, 0.05, dt / f) * rctc.G_CM
-y = rctc.relative_displacement(rctc.Interpft(h2, f), T, 0.05, dt / f) * rctc.G_CM
-r, phi, a, b = rctc._hull_cones(x, y)
+f = spectra.interpolation_factor(dt)
+x = spectra.relative_displacement(spectra.Interpft(h1, f), T, 0.05, dt / f) * spectra.G_CM
+y = spectra.relative_displacement(spectra.Interpft(h2, f), T, 0.05, dt / f) * spectra.G_CM
+r, phi, a, b = convex_hull.hull_cones(x, y)
 vx, vy = r * np.cos(phi), r * np.sin(phi)
 order = np.argsort(np.mod(a, 2 * np.pi))
-rotd = rctc.rotd_percentiles(x, y, [0, 50, 100])
+rotd = convex_hull.rotd_percentiles(x, y, [0, 50, 100])
 
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(6.5, 3.0), gridspec_kw={'width_ratios': [1, 1.35]})
 ax1.plot(-x, -y, color='0.82', lw=0.5)

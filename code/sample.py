@@ -13,11 +13,12 @@ from multiprocessing import Pool
 import numpy as np
 
 import intensity
-import rctc
+import convex_hull
+import spectra
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PCT = [0, 50, 100]
-PERIODS = np.array(rctc.DEFAULT_PERIODS)
+PERIODS = np.array(spectra.DEFAULT_PERIODS)
 THETA = np.radians(np.arange(0, 180))
 
 
@@ -34,26 +35,26 @@ def one(tsm):
         return None
     h1, h2 = h1[:n], h2[:n]
     t0 = time.perf_counter()
-    exact = np.array(rctc.RotD_cal_PSA(h1, h2, dt, PERIODS, combine_index=PCT)['PSA_RotDxx'])
+    exact = np.array(spectra.RotD_cal_PSA(h1, h2, dt, PERIODS, combine_index=PCT)['PSA_RotDxx'])
     t_exact = time.perf_counter() - t0
     t0 = time.perf_counter()
-    angles = np.array(rctc.RotD_cal_PSA(h1, h2, dt, PERIODS, combine_index=PCT, method='angles')['PSA_RotDxx'])
+    angles = np.array(spectra.RotD_cal_PSA(h1, h2, dt, PERIODS, combine_index=PCT, method='angles')['PSA_RotDxx'])
     t_angles = time.perf_counter() - t0
-    subset = np.array(rctc.RotD_cal_PSA(h1, h2, dt, PERIODS, combine_index=PCT, fraction=0.7)['PSA_RotDxx'])
+    subset = np.array(spectra.RotD_cal_PSA(h1, h2, dt, PERIODS, combine_index=PCT, fraction=0.7)['PSA_RotDxx'])
     # Hull vertices and the bound on RotD0's one-degree error (tan of the half-angle of the edge nearest the origin).
-    f = rctc.interpolation_factor(dt)
-    fine1, fine2 = rctc.Interpft(h1, f), rctc.Interpft(h2, f)
+    f = spectra.interpolation_factor(dt)
+    fine1, fine2 = spectra.Interpft(h1, f), spectra.Interpft(h2, f)
     vertices = np.zeros(len(PERIODS), int)
     tan_beta = np.zeros(len(PERIODS))
     for i, p in enumerate(PERIODS):
         if p == -1:
-            x, y = rctc._cumtrapz(h1, dt), rctc._cumtrapz(h2, dt)
+            x, y = spectra._cumtrapz(h1, dt), spectra._cumtrapz(h2, dt)
         elif p == 0:
             x, y = h1, h2
         else:
-            x = rctc.relative_displacement(fine1, p, 0.05, dt / f)
-            y = rctc.relative_displacement(fine2, p, 0.05, dt / f)
-        r, phi, a, b = rctc._hull_cones(x, y)
+            x = spectra.relative_displacement(fine1, p, 0.05, dt / f)
+            y = spectra.relative_displacement(fine2, p, 0.05, dt / f)
+        r, phi, a, b = convex_hull.hull_cones(x, y)
         vertices[i] = len(r)
         # The least support is at an edge normal; there the two vertices' angular distance from it is beta.
         far = np.maximum(np.abs(a - phi), np.abs(b - phi))

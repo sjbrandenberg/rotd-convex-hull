@@ -1,21 +1,22 @@
 """Exact RotDxx of Arias intensity and band-limited CAV, from nga-gm's
 bin/compute_metrics.py (commit 1263221), with the helpers they need.
 
-Accelerations are in g here (as in rctc.py); Arias intensity and CAV are
+Accelerations are in g here (as in spectra.py); Arias intensity and CAV are
 returned in m/s.
 """
 
 import numpy as np
 
-import rctc
+import convex_hull
+import spectra
 
-G = rctc.G_CM / 100  # m/s^2
+G = spectra.G_CM / 100  # m/s^2
 
 
 def band_limited(acc, dt):
-    """acc sinc interpolated as rctc.RotD_cal_PSA() interpolates it, and its time step."""
-    factor = rctc.interpolation_factor(dt)
-    return rctc.Interpft(acc, factor), dt / factor
+    """acc sinc interpolated as spectra.RotD_cal_PSA() interpolates it, and its time step."""
+    factor = spectra.interpolation_factor(dt)
+    return spectra.Interpft(acc, factor), dt / factor
 
 
 def trapezoid_abs(acc, dt):
@@ -53,4 +54,4 @@ def rotd_cav_bl(h1_g, h2_g, dt, percentiles):
     fine2, _ = band_limited(np.asarray(h2_g, float) * G, dt)
     weights = np.full(len(fine1), fine_dt)
     weights[0] = weights[-1] = fine_dt / 2
-    return rctc.abs_sum_percentiles(weights * fine1, weights * fine2, percentiles)
+    return convex_hull.abs_sum_percentiles(weights * fine1, weights * fine2, percentiles)

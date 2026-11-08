@@ -1,39 +1,30 @@
-"""A Python port of the parts of the RCTC R package (Wang et al., MIT
-license, https://github.com/wltcwpf/RCTC, version 0.2.4) that
-compute_metrics.py uses: PS_cal_cpp() and RotD_cal_PSA(), with the
-functions they call (GM_RotD_cal(), Interpft(), and subset_select()), and
-rotd_percentiles(), which isn't in RCTC.
+"""Response spectra and RotD of two horizontal components, with the
+calculations of the RCTC R package (Wang et al., 2017; MIT license,
+https://github.com/wltcwpf/RCTC, version 0.2.4) for comparison. RCTC
+doesn't use the convex hull: its oscillator (PS_cal_cpp()), sinc
+interpolation (Interpft()), and rotation through 180 one-degree angles
+(GM_RotD_cal(), with RCTC's subset of points, subset_select()) are ported
+here so that the exact method can be compared with RCTC's own calculation.
+Each follows the R or C++ original, so the results match RCTC's to
+rounding, except that the oscillator recursion runs as an IIR filter
+(scipy.signal.lfilter) rather than a loop.
 
-Each function follows the R or C++ original, so the results match RCTC's to
-rounding, with three changes:
-
-- Speed: the oscillator recursion in PS_cal_cpp() runs as an IIR filter
-  (scipy.signal.lfilter) rather than a loop.
-- Exact peaks at each angle: GM_RotD_cal() takes fraction=None, which
-  rotates only the vertices of the convex hull of the two components'
-  response orbit (and its reflection). The peak at any angle is the hull's
-  extent in that direction, so this gives the same peaks as rotating every
-  point. RCTC's default, fraction=0.7, rotates only the points whose
-  amplitude is at least 0.7 times the smaller component's peak. That can
-  leave out the point that sets an angle's peak, and makes RotD00 too low
-  (by up to 15% in tests). Pass fraction=0.7 to reproduce RCTC.
-- Exact RotDxx over all angles: by default (method='exact'), RotD_cal_PSA()
-  takes each percentile over the continuous range of angles from 0 to 180
-  degrees, not over RCTC's 180 one-degree angles (rotd_percentiles()).
-  Between changes of hull vertex the peak is a cosine of the angle, so the
-  fraction of angles below any level can be added up exactly, and RotDxx
-  is the level where it equals xx%, found by bisection. RotD0 (the nearest
-  hull edge) and RotD100 (the farthest vertex) are exact outright. With
-  one-degree angles, RotD0 of a strongly polarized response, whose minimum
-  is a sharp V, can be off by a third, and RotD50 by up to 0.2%. Pass
-  method='angles' for RCTC's one-degree angles.
+RotD_cal_PSA() takes RCTC's arguments and by default (method='exact')
+computes RotDxx over the continuous range of angles from 0 to 180 degrees
+with the convex hull method of convex_hull.py. method='angles' takes RCTC's
+180 one-degree angles, rotating only the hull's vertices (fraction=None),
+which gives the same peaks at those angles as rotating every point.
+fraction=0.7 reproduces RCTC's default, which rotates only the points whose
+amplitude is at least 0.7 times the smaller component's peak. That can
+leave out the point that sets an angle's peak, and makes RotD0 too low.
 
 Accelerations are in g. Periods are in s.
 """
 
 import numpy as np
 from scipy.signal import lfilter, lfiltic
-from scipy.spatial import ConvexHull, QhullError
+
+import convex_hull
 
 # g in cm/s^2, as RCTC, compute_metrics.py (9.81 m/s^2), the site's VT2 and
 # DT2 files, and the original processing's R code (velts * 9.81 * 100) use.
@@ -164,199 +155,6 @@ def subset_select(data1, data2, fraction, length):
     return data1[keep], data2[keep], alevel
 
 
-def _angle_bound(x, y, norms):
-    """A lower bound on the peak at each of the 180 one-degree angles: the
-    smallest over those angles of the peak of the 256 points farthest from
-    the origin, rotated. A point closer to the origin than it can't be the
-    peak at any of those angles. Zero for 512 points or fewer, which aren't
-    worth pruning."""
-    if len(x) <= 512:
-        return 0.0
-    far = np.argpartition(norms, -256)[-256:]
-    theta = np.radians(np.arange(0, 180))
-    return np.min(np.max(np.abs(np.outer(np.cos(theta), x[far]) + np.outer(np.sin(theta), y[far])), axis=1))
-
-
-def hull_select(data1, data2):
-    """Points of two series at which every rotated series' peak absolute
-    value is reached, for the 180 one-degree rotations: the vertices of the
-    convex hull of their orbit and its reflection through the origin. A
-    rotated series' peak is the hull's extent in that direction."""
-    data1 = np.asarray(data1, dtype=float)
-    data2 = np.asarray(data2, dtype=float)
-    norms = np.hypot(data1, data2)
-    keep = norms >= _angle_bound(data1, data2, norms)
-    points = np.column_stack([data1[keep], data2[keep]])
-    try:
-        vertices = ConvexHull(np.vstack([points, -points])).vertices
-    except (QhullError, ValueError):
-        # Degenerate orbits (all zero, or on a line) have no 2-D hull.
-        return points[:, 0], points[:, 1]
-    # A reflected vertex stands for its original point: the peaks are of
-    # absolute values.
-    vertices = np.unique(vertices % len(points))
-    return points[vertices, 0], points[vertices, 1]
-
-
-def _hull_cones(data1, data2):
-    """The vertices of the convex hull of the points (data1, data2) and their
-    reflections through the origin, as distance r and direction phi, and the
-    range of directions [a, b] over which each vertex sets the peak: there the
-    peak of the two series rotated to angle theta is r cos(theta - phi).
-
-    Points that can't be a vertex are dropped first. _angle_bound() bounds
-    the peak only at one-degree angles, and the least peak can lie between
-    them, far below it for a strongly polarized orbit. The hull of the points
-    kept gives a bound over all directions, its least peak, which is no more
-    than the whole hull's: the points dropped that are farther from the
-    origin than that are added to the hull's vertices, and the hull found
-    again from those."""
-    # Only the points kept are stacked as rows (x, y): the series are long.
-    norms = np.hypot(data1, data2)
-    bound = _angle_bound(data1, data2, norms)
-    keep = norms >= bound
-    vertices = _hull_vertices(np.column_stack([data1[keep], data2[keep]]))
-    cones = _vertex_cones(vertices)
-    least = _least_peak(*cones)
-    if least < bound:
-        missed = (norms >= least) & ~keep
-        if np.any(missed):
-            cones = _vertex_cones(_hull_vertices(np.vstack([vertices, np.column_stack([data1[missed], data2[missed]])])))
-    return cones
-
-
-def _least_peak(r, phi, a, b):
-    """The least peak over all directions: at the end of each vertex's range
-    farther from its direction."""
-    return float(np.min(r * np.cos(np.maximum(np.abs(a - phi), np.abs(b - phi)))))
-
-
-def _hull_vertices(points):
-    """The vertices, counterclockwise, of the convex hull of points (rows
-    (x, y)) and their reflections through the origin."""
-    both = np.vstack([points, -points])
-    try:
-        # In 2-D, Qhull lists the vertices counterclockwise.
-        return both[ConvexHull(both).vertices]
-    except (QhullError, ValueError):
-        # On a line through the origin (or all zero): the farthest point and
-        # its reflection, each setting the peak over half the circle.
-        far = points[np.argmax(np.hypot(points[:, 0], points[:, 1]))]
-        return np.array([far, -far])
-
-
-def _vertex_cones(vertices):
-    """_hull_cones() of a hull's vertices, counterclockwise (_hull_vertices())."""
-    r = np.hypot(vertices[:, 0], vertices[:, 1])
-    phi = np.arctan2(vertices[:, 1], vertices[:, 0])
-    if len(vertices) == 2:
-        a, b = phi - np.pi / 2, phi + np.pi / 2
-    else:
-        edges = np.roll(vertices, -1, axis=0) - vertices
-        normal = np.arctan2(-edges[:, 0], edges[:, 1])  # outward normal of each counterclockwise edge
-        a, b = np.roll(normal, 1), normal
-    # Each range runs counterclockwise from a to b. A vertex's own direction
-    # needn't lie in its range, but every direction in the range is within
-    # 90 degrees of it, so phi is taken as the copy nearest the range's middle.
-    b = a + np.mod(b - a, 2 * np.pi)
-    phi = phi + 2 * np.pi * np.round((0.5 * (a + b) - phi) / (2 * np.pi))
-    return r, phi, a, b
-
-
-def _zonotope_cones(g1, g2):
-    """The vertices of the zonotope sum_i [-g_i, g_i] (the Minkowski sum of
-    the segments from -g_i to g_i), as distance r and direction phi, and the
-    range of directions [a, b] over which each vertex sets its support
-    function, sum_i |g_i . u(theta)|, over half a circle: there that sum is
-    r cos(theta - phi).
-
-    With every g_i turned into the upper half plane (which leaves |g_i . u|
-    alone) and sorted by direction gamma_i, from theta = -90 degrees, where
-    every g_i . u is negative, g_i . u turns positive at gamma_i - 90
-    degrees. So the vertex from there to the next turn is -S + 2 (g_1 + ...
-    + g_k), with S the sum of all the g_i."""
-    g1 = np.asarray(g1, dtype=float)
-    g2 = np.asarray(g2, dtype=float)
-    keep = (g1 != 0) | (g2 != 0)
-    g1, g2 = g1[keep], g2[keep]
-    flip = (g2 < 0) | ((g2 == 0) & (g1 < 0))
-    g1 = np.where(flip, -g1, g1)
-    g2 = np.where(flip, -g2, g2)
-    gamma = np.arctan2(g2, g1)
-    order = np.argsort(gamma, kind='stable')
-    g1, g2, gamma = g1[order], g2[order], gamma[order]
-    vx = 2 * np.concatenate([[0.0], np.cumsum(g1)]) - np.sum(g1)
-    vy = 2 * np.concatenate([[0.0], np.cumsum(g2)]) - np.sum(g2)
-    edges = np.concatenate([[0.0], gamma, [np.pi]]) - np.pi / 2
-    a, b = edges[:-1], edges[1:]
-    nonempty = b > a
-    r, a, b = np.hypot(vx, vy)[nonempty], a[nonempty], b[nonempty]
-    phi = np.arctan2(vy, vx)[nonempty]
-    # As in _hull_cones(): the copy of phi nearest the range's middle.
-    phi = phi + 2 * np.pi * np.round((0.5 * (a + b) - phi) / (2 * np.pi))
-    return r, phi, a, b
-
-
-def _fraction_below(levels, r, phi, a, b, span=2 * np.pi):
-    """For each level m, the fraction of directions in which the support
-    (the peak) is at most m: in each vertex's range, those where
-    |theta - phi| >= arccos(m / r). span is the total angle of the ranges."""
-    beta = np.arccos(np.clip(np.asarray(levels, dtype=float)[:, None] / r, -1.0, 1.0))
-    above = np.clip(np.minimum(b, phi + beta) - np.maximum(a, phi - beta), 0, None)
-    return np.sum((b - a) - above, axis=1) / span
-
-
-def _cone_percentiles(r, phi, a, b, percentiles, span):
-    """Percentiles over all directions of a support function given by its
-    vertices and their ranges (_hull_cones() or _zonotope_cones())."""
-    percentiles = np.asarray(percentiles, dtype=float)
-    # Most at the farthest vertex, whose own direction lies in its range.
-    least = _least_peak(r, phi, a, b)
-    most = float(np.max(r))
-    out = np.where(percentiles <= 0, least, most).astype(float)
-    inner = (percentiles > 0) & (percentiles < 100)
-    if np.any(inner):
-        lo = np.full(np.sum(inner), least)
-        hi = np.full(np.sum(inner), most)
-        target = percentiles[inner] / 100
-        for _ in range(200):
-            mid = 0.5 * (lo + hi)
-            below = _fraction_below(mid, r, phi, a, b, span) < target
-            lo = np.where(below, mid, lo)
-            hi = np.where(below, hi, mid)
-            if np.all(hi - lo <= 4 * np.finfo(float).eps * most):
-                break
-        out[inner] = 0.5 * (lo + hi)
-    return out
-
-
-def rotd_percentiles(data1, data2, percentiles):
-    """Percentiles over all angles from 0 to 180 degrees of the peak absolute
-    value of data1 cos(theta) + data2 sin(theta): RotDxx for xx in
-    percentiles, exact rather than over a set of angles (see the module
-    docstring). data1 and data2 are the whole series: _hull_cones() drops
-    the points that can't set a peak."""
-    data1 = np.asarray(data1, dtype=float)
-    data2 = np.asarray(data2, dtype=float)
-    if len(data1) == 0 or not np.any(data1) and not np.any(data2):
-        return np.zeros(len(percentiles))
-    return _cone_percentiles(*_hull_cones(data1, data2), percentiles, 2 * np.pi)
-
-
-def abs_sum_percentiles(g1, g2, percentiles):
-    """Percentiles over all angles from 0 to 180 degrees of
-    sum_i |g1_i cos(theta) + g2_i sin(theta)|, exact. That sum, such as a
-    trapezoidal CAV with g the weighted samples, is the support function of
-    a zonotope (_zonotope_cones()), a cosine between the angles where one
-    term changes sign, so the percentiles follow as rotd_percentiles()'s
-    do, with one vertex per term."""
-    g1 = np.asarray(g1, dtype=float)
-    g2 = np.asarray(g2, dtype=float)
-    if not np.any(g1) and not np.any(g2):
-        return np.zeros(len(percentiles))
-    return _cone_percentiles(*_zonotope_cones(g1, g2), percentiles, np.pi)
-
-
 def _cumtrapz(y, dt):
     """pracma::cumtrapz() on evenly spaced points: starts at 0."""
     out = np.zeros(len(y))
@@ -424,7 +222,7 @@ def GM_RotD_cal(data1, data2, period_t, damping, time_dt, fraction=None, Interpo
         rd1 = relative_displacement(data1, period, damping, time_dt) * G_CM
         rd2 = relative_displacement(data2, period, damping, time_dt) * G_CM
         if fraction is None:
-            rot_rd1, rot_rd2 = hull_select(rd1, rd2)
+            rot_rd1, rot_rd2 = convex_hull.hull_select(rd1, rd2)
         else:
             rot_rd1, rot_rd2, _ = subset_select(rd1, rd2, fraction, number)
         rotd180[:, i] = _rotated_peaks(rot_rd1, rot_rd2) * omega**2 / G_CM
@@ -467,7 +265,7 @@ def _rotd_exact(data1, data2, time_dt, period, damping, percentiles, Interpolati
             scale = (2 * np.pi / p)**2 / G_CM
         h1[i] = np.max(np.abs(x)) * scale
         h2[i] = np.max(np.abs(y)) * scale
-        rotdxx[:, i] = rotd_percentiles(x, y, percentiles) * scale
+        rotdxx[:, i] = convex_hull.rotd_percentiles(x, y, percentiles) * scale
     return h1, h2, rotdxx
 
 
@@ -479,7 +277,7 @@ def RotD_cal_PSA(data1, data2, dt, period=None, damping=0.05, combine_index=50, 
     list, which returns a RotDxx array for each, computing the responses
     once.
 
-    method='exact' takes RotDxx over all angles (rotd_percentiles());
+    method='exact' takes RotDxx over all angles (convex_hull.rotd_percentiles());
     method='angles' over RCTC's 180 one-degree angles, as R's quantile().
     fraction is as in GM_RotD_cal(): None (exact peaks) or RCTC's 0.7, which
     implies method='angles'. Each component's own values are the same

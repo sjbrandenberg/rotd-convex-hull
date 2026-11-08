@@ -8,7 +8,8 @@ import time
 
 import numpy as np
 
-import rctc
+import convex_hull
+import spectra
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PCT = [0, 50, 100]
@@ -24,34 +25,34 @@ def brute(x, y):
 def main():
     d = np.load(os.path.join(ROOT, 'data', '57394.npz'))
     h1, h2, dt = d['h1'], d['h2'], float(d['dt'])
-    periods = np.array(rctc.DEFAULT_PERIODS)
+    periods = np.array(spectra.DEFAULT_PERIODS)
     t0 = time.perf_counter()
-    exact = rctc.RotD_cal_PSA(h1, h2, dt, periods, combine_index=PCT)
+    exact = spectra.RotD_cal_PSA(h1, h2, dt, periods, combine_index=PCT)
     t_exact = time.perf_counter() - t0
     t0 = time.perf_counter()
-    angles = rctc.RotD_cal_PSA(h1, h2, dt, periods, combine_index=PCT, method='angles')
+    angles = spectra.RotD_cal_PSA(h1, h2, dt, periods, combine_index=PCT, method='angles')
     t_angles = time.perf_counter() - t0
     t0 = time.perf_counter()
-    subset = rctc.RotD_cal_PSA(h1, h2, dt, periods, combine_index=PCT, fraction=0.7)
+    subset = spectra.RotD_cal_PSA(h1, h2, dt, periods, combine_index=PCT, fraction=0.7)
     t_subset = time.perf_counter() - t0
 
     # Brute force over every (interpolated) point at 180 angles, and hull vertex counts.
-    factor = rctc.interpolation_factor(dt)
-    fine1, fine2 = rctc.Interpft(h1, factor), rctc.Interpft(h2, factor)
+    factor = spectra.interpolation_factor(dt)
+    fine1, fine2 = spectra.Interpft(h1, factor), spectra.Interpft(h2, factor)
     fine_dt = dt / factor
     vertices, brute_vals, n_points = [], [], len(fine1)
     t0 = time.perf_counter()
     for p in periods:
         if p == -1:
-            x, y, s = rctc._cumtrapz(h1, dt) * rctc.G_CM, rctc._cumtrapz(h2, dt) * rctc.G_CM, 1.0
+            x, y, s = spectra._cumtrapz(h1, dt) * spectra.G_CM, spectra._cumtrapz(h2, dt) * spectra.G_CM, 1.0
         elif p == 0:
             x, y, s = h1, h2, 1.0
         else:
-            x = rctc.relative_displacement(fine1, p, 0.05, fine_dt) * rctc.G_CM
-            y = rctc.relative_displacement(fine2, p, 0.05, fine_dt) * rctc.G_CM
-            s = (2 * np.pi / p) ** 2 / rctc.G_CM
+            x = spectra.relative_displacement(fine1, p, 0.05, fine_dt) * spectra.G_CM
+            y = spectra.relative_displacement(fine2, p, 0.05, fine_dt) * spectra.G_CM
+            s = (2 * np.pi / p) ** 2 / spectra.G_CM
         brute_vals.append(brute(x, y) * s)
-        vertices.append(len(rctc._hull_cones(x, y)[0]))
+        vertices.append(len(convex_hull.hull_cones(x, y)[0]))
     t_brute = time.perf_counter() - t0
 
     out = {

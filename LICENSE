@@ -22,7 +22,7 @@ SOFTWARE.
 
 -------------------------------------------------------------------------------
 
-code/rctc.py is a Python port of parts of the RCTC R package
+code/spectra.py ports parts of the RCTC R package
 (https://github.com/wltcwpf/RCTC), which is distributed under this license:
 
 MIT License

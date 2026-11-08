@@ -20,7 +20,8 @@ and of **band-limited cumulative absolute velocity** (the support function of a 
 
 | File | What it does |
 |---|---|
-| `code/rctc.py` | A Python port of the RCTC R package's response spectrum and RotD calculations (Wang et al., 2017), with the exact convex hull method (`rotd_percentiles()`, and `RotD_cal_PSA(..., method='exact')`, the default). `method='angles'` gives 180 one-degree angles and `fraction=0.7` RCTC's default subset, for comparison. |
+| `code/convex_hull.py` | The exact method: RotDnn of any two series over all rotation angles from the convex hull (`rotd_percentiles()`), and of sums of absolute values such as CAV from a zonotope (`abs_sum_percentiles()`). Needs only numpy and scipy. |
+| `code/spectra.py` | Response spectra and RotD of PGA, PGV, and PSA (`RotD_cal_PSA()`, exact by default). For comparison, it also ports the calculations of the RCTC R package (Wang et al., 2017), which doesn't use the convex hull: `method='angles'` gives 180 one-degree angles and `fraction=0.7` RCTC's default subset. |
 | `code/intensity.py` | Exact RotDnn of Arias intensity (`rotd_ia()`) and band-limited CAV (`rotd_cav_bl()`). |
 | `code/fetch_records.py` | Downloads records from the NGA-gm database API (https://nga-gm.org; Buckreis et al., 2025) into `data/`. Needs an API token from a nga-gm.org account. |
 | `code/tabas.py` | The Tabas record (1978 Tabas, Iran; time_series_metadata_id 57394): exact, one-degree, and RCTC-subset RotD of PGA, PGV, and PSA. |
@@ -48,14 +49,15 @@ python fig_hull.py && python fig_spectra.py && python fig_pacoima.py && python f
 
 ```python
 import numpy as np
-import rctc
+import convex_hull
+import spectra
 
 # h1, h2: two horizontal accelerations (g) at time step dt (s)
-out = rctc.RotD_cal_PSA(h1, h2, dt, combine_index=[0, 50, 100])  # periods -1 (PGV, cm/s), 0 (PGA), and PSA (g)
+out = spectra.RotD_cal_PSA(h1, h2, dt, combine_index=[0, 50, 100])  # periods -1 (PGV, cm/s), 0 (PGA), and PSA (g)
 rotd0, rotd50, rotd100 = out['PSA_RotDxx']
 
 # Any two series, e.g. oscillator responses: exact percentiles of the peak over all angles
-rctc.rotd_percentiles(x, y, [0, 50, 100])
+convex_hull.rotd_percentiles(x, y, [0, 50, 100])
 ```
 
 ## References
@@ -69,4 +71,4 @@ rctc.rotd_percentiles(x, y, [0, 50, 100])
 
 ## License
 
-MIT (see `LICENSE`, which also carries the license of the RCTC package that `code/rctc.py` is ported from).
+MIT (see `LICENSE`, which also carries the license of the RCTC package, parts of which `code/spectra.py` ports).

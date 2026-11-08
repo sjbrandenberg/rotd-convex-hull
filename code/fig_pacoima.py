@@ -7,27 +7,28 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-import rctc
+import convex_hull
+import spectra
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 plt.rcParams.update({'font.family': 'Arial', 'font.size': 9, 'axes.linewidth': 0.8})
 d = np.load(os.path.join(ROOT, 'data', '74.npz'))
 h1, h2, dt = d['h1'], d['h2'], float(d['dt'])
-per = np.array(rctc.NGAW2_PERIODS)
-ex = rctc.RotD_cal_PSA(h1, h2, dt, per, combine_index=0)['PSA_RotDxx']
-an = rctc.RotD_cal_PSA(h1, h2, dt, per, combine_index=0, method='angles')['PSA_RotDxx']
+per = np.array(spectra.NGAW2_PERIODS)
+ex = spectra.RotD_cal_PSA(h1, h2, dt, per, combine_index=0)['PSA_RotDxx']
+an = spectra.RotD_cal_PSA(h1, h2, dt, per, combine_index=0, method='angles')['PSA_RotDxx']
 T = per[np.argmax(an / ex)]
-f = rctc.interpolation_factor(dt)
+f = spectra.interpolation_factor(dt)
 scale = (2 * np.pi / T) ** 2
-x = rctc.relative_displacement(rctc.Interpft(h1, f), T, 0.05, dt / f) * scale
-y = rctc.relative_displacement(rctc.Interpft(h2, f), T, 0.05, dt / f) * scale
-r, phi, a, b = rctc._hull_cones(x, y)
+x = spectra.relative_displacement(spectra.Interpft(h1, f), T, 0.05, dt / f) * scale
+y = spectra.relative_displacement(spectra.Interpft(h2, f), T, 0.05, dt / f) * scale
+r, phi, a, b = convex_hull.hull_cones(x, y)
 vx, vy = r * np.cos(phi), r * np.sin(phi)
 grid = np.radians(np.linspace(0, 180, 180001))
 D = np.max(np.abs(np.outer(np.cos(grid), vx) + np.outer(np.sin(grid), vy)), axis=1)
 deg = np.arange(0, 180)
 S = np.max(np.abs(np.outer(np.cos(np.radians(deg)), x) + np.outer(np.sin(np.radians(deg)), y)), axis=1)
-rotd = rctc.rotd_percentiles(x, y, [0, 50, 100])
+rotd = convex_hull.rotd_percentiles(x, y, [0, 50, 100])
 far = np.maximum(np.abs(a - phi), np.abs(b - phi))
 tan_beta = np.tan(far[np.argmin(r * np.cos(far))])
 
