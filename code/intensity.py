@@ -1,5 +1,6 @@
-"""Exact RotDxx of Arias intensity and band-limited CAV, from nga-gm's
-bin/compute_metrics.py (commit 1263221), with the helpers they need.
+"""Exact RotDxx of Arias intensity (a closed form) and band-limited CAV (the
+support function of a zonotope, convex_hull.abs_sum_percentiles()), with the
+helpers they need.
 
 Accelerations are in g here (as in spectra.py); Arias intensity and CAV are
 returned in m/s.

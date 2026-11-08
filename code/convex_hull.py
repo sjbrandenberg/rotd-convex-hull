@@ -13,46 +13,16 @@ The same holds for a sum of absolute values, sum_i |g_i . u(theta)|, such
 as a trapezoidal CAV, with the zonotope sum_i [-g_i, g_i] in place of the
 hull (abs_sum_percentiles()).
 
-Needs only numpy and scipy (Qhull). spectra.py computes the series (the
-oscillator responses) and calls these.
+Needs only numpy and scipy (Qhull).
 """
 
 import numpy as np
 from scipy.spatial import ConvexHull, QhullError
 
 
-def _angle_bound(x, y, norms):
-    """A lower bound on the peak at each of the 180 one-degree angles: the
-    smallest over those angles of the peak of the 256 points farthest from
-    the origin, rotated. A point closer to the origin than it can't be the
-    peak at any of those angles. Zero for 512 points or fewer, which aren't
-    worth pruning."""
-    if len(x) <= 512:
-        return 0.0
-    far = np.argpartition(norms, -256)[-256:]
-    theta = np.radians(np.arange(0, 180))
-    return np.min(np.max(np.abs(np.outer(np.cos(theta), x[far]) + np.outer(np.sin(theta), y[far])), axis=1))
-
-
-def hull_select(data1, data2):
-    """Points of two series at which every rotated series' peak absolute
-    value is reached, for the 180 one-degree rotations: the vertices of the
-    convex hull of their orbit and its reflection through the origin. A
-    rotated series' peak is the hull's extent in that direction."""
-    data1 = np.asarray(data1, dtype=float)
-    data2 = np.asarray(data2, dtype=float)
-    norms = np.hypot(data1, data2)
-    keep = norms >= _angle_bound(data1, data2, norms)
-    points = np.column_stack([data1[keep], data2[keep]])
-    try:
-        vertices = ConvexHull(np.vstack([points, -points])).vertices
-    except (QhullError, ValueError):
-        # Degenerate orbits (all zero, or on a line) have no 2-D hull.
-        return points[:, 0], points[:, 1]
-    # A reflected vertex stands for its original point: the peaks are of
-    # absolute values.
-    vertices = np.unique(vertices % len(points))
-    return points[vertices, 0], points[vertices, 1]
+# Points farther from the origin than this many are hulled first, to find
+# the points that can't be vertices (hull_cones()).
+FAR_POINTS = 1024
 
 
 def hull_cones(data1, data2):
@@ -61,25 +31,19 @@ def hull_cones(data1, data2):
     range of directions [a, b] over which each vertex sets the peak: there the
     peak of the two series rotated to angle theta is r cos(theta - phi).
 
-    Points that can't be a vertex are dropped first. _angle_bound() bounds
-    the peak only at one-degree angles, and the least peak can lie between
-    them, far below it for a strongly polarized orbit. The hull of the points
-    kept gives a bound over all directions, its least peak, which is no more
-    than the whole hull's: the points dropped that are farther from the
-    origin than that are added to the hull's vertices, and the hull found
-    again from those."""
-    # Only the points kept are stacked as rows (x, y): the series are long.
+    Qhull would find the vertices from every point, but most points lie well
+    inside the hull, so they are dropped first, which saves most of the time.
+    The hull of the FAR_POINTS points farthest from the origin lies inside the
+    whole hull, and so does the circle about the origin that touches that
+    hull's nearest edge (radius its least peak, _least_peak()). A point
+    inside that circle is inside the whole hull, so it isn't a vertex."""
     norms = np.hypot(data1, data2)
-    bound = _angle_bound(data1, data2, norms)
-    keep = norms >= bound
-    vertices = _hull_vertices(np.column_stack([data1[keep], data2[keep]]))
-    cones = _vertex_cones(vertices)
-    least = _least_peak(*cones)
-    if least < bound:
-        missed = (norms >= least) & ~keep
-        if np.any(missed):
-            cones = _vertex_cones(_hull_vertices(np.vstack([vertices, np.column_stack([data1[missed], data2[missed]])])))
-    return cones
+    if len(norms) > 2 * FAR_POINTS:
+        far = np.argpartition(norms, -FAR_POINTS)[-FAR_POINTS:]
+        radius = _least_peak(*_vertex_cones(_hull_vertices(np.column_stack([data1[far], data2[far]]))))
+        keep = norms >= radius
+        data1, data2 = data1[keep], data2[keep]
+    return _vertex_cones(_hull_vertices(np.column_stack([data1, data2])))
 
 
 def _least_peak(r, phi, a, b):

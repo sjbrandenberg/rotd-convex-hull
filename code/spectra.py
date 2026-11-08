@@ -23,11 +23,11 @@ Accelerations are in g. Periods are in s.
 
 import numpy as np
 from scipy.signal import lfilter, lfiltic
+from scipy.spatial import ConvexHull, QhullError
 
 import convex_hull
 
-# g in cm/s^2, as RCTC, compute_metrics.py (9.81 m/s^2), the site's VT2 and
-# DT2 files, and the original processing's R code (velts * 9.81 * 100) use.
+# g in cm/s^2, as RCTC uses.
 G_CM = 981.0
 
 # RotD_cal_PSA()'s default periods: -1 for PGV, 0 for PGA, and the 111
@@ -155,6 +155,41 @@ def subset_select(data1, data2, fraction, length):
     return data1[keep], data2[keep], alevel
 
 
+def _angle_bound(x, y, norms):
+    """A lower bound on the peak at each of the 180 one-degree angles: the
+    smallest over those angles of the peak of the 256 points farthest from
+    the origin, rotated. A point closer to the origin than it can't be the
+    peak at any of those angles. Zero for 512 points or fewer, which aren't
+    worth pruning."""
+    if len(x) <= 512:
+        return 0.0
+    far = np.argpartition(norms, -256)[-256:]
+    theta = np.radians(np.arange(0, 180))
+    return np.min(np.max(np.abs(np.outer(np.cos(theta), x[far]) + np.outer(np.sin(theta), y[far])), axis=1))
+
+
+def hull_select(data1, data2):
+    """Points of two series at which every rotated series' peak absolute
+    value is reached, for the 180 one-degree rotations: the vertices of the
+    convex hull of their orbit and its reflection through the origin. A
+    rotated series' peak is the hull's extent in that direction, so rotating
+    these gives the same peaks at those angles as rotating every point."""
+    data1 = np.asarray(data1, dtype=float)
+    data2 = np.asarray(data2, dtype=float)
+    norms = np.hypot(data1, data2)
+    keep = norms >= _angle_bound(data1, data2, norms)
+    points = np.column_stack([data1[keep], data2[keep]])
+    try:
+        vertices = ConvexHull(np.vstack([points, -points])).vertices
+    except (QhullError, ValueError):
+        # Degenerate orbits (all zero, or on a line) have no 2-D hull.
+        return points[:, 0], points[:, 1]
+    # A reflected vertex stands for its original point: the peaks are of
+    # absolute values.
+    vertices = np.unique(vertices % len(points))
+    return points[vertices, 0], points[vertices, 1]
+
+
 def _cumtrapz(y, dt):
     """pracma::cumtrapz() on evenly spaced points: starts at 0."""
     out = np.zeros(len(y))
@@ -188,7 +223,8 @@ def GM_RotD_cal(data1, data2, period_t, damping, time_dt, fraction=None, Interpo
     (cm/s), and pgd_rot (cm) by angle. The GMRotD outputs aren't ported.
 
     fraction=None rotates the vertices of the response orbit's convex hull
-    (exact); a number rotates RCTC's subset (see subset_select())."""
+    (hull_select()), which gives the peaks of every point at these angles; a
+    number rotates RCTC's subset (see subset_select())."""
     data1 = np.asarray(data1, dtype=float)
     data2 = np.asarray(data2, dtype=float)
     vel_1 = _cumtrapz(data1, time_dt) * G_CM
@@ -222,7 +258,7 @@ def GM_RotD_cal(data1, data2, period_t, damping, time_dt, fraction=None, Interpo
         rd1 = relative_displacement(data1, period, damping, time_dt) * G_CM
         rd2 = relative_displacement(data2, period, damping, time_dt) * G_CM
         if fraction is None:
-            rot_rd1, rot_rd2 = convex_hull.hull_select(rd1, rd2)
+            rot_rd1, rot_rd2 = hull_select(rd1, rd2)
         else:
             rot_rd1, rot_rd2, _ = subset_select(rd1, rd2, fraction, number)
         rotd180[:, i] = _rotated_peaks(rot_rd1, rot_rd2) * omega**2 / G_CM
